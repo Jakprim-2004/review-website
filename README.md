@@ -49,7 +49,7 @@
 
 ## 📁 โครงสร้างโปรเจค
 
-\`\`\`
+```
 reviewwebsite/
 ├── app/                          # Next.js App Router
 │   ├── admin/                    # ระบบผู้ดูแล
@@ -78,7 +78,7 @@ reviewwebsite/
 ├── hooks/                       # Custom Hooks
 ├── styles/                      # Additional Styles
 └── public/                      # Static Assets
-\`\`\`
+```
 
 ## 🛠️ การติดตั้งและใช้งาน
 
@@ -223,31 +223,7 @@ firebase deploy
 - ตรวจสอบ Console สำหรับ Error
 - ตรวจสอบว่า Firebase Rules ถูกต้อง
 
-## 🤝 การมีส่วนร่วม
 
-1. Fork โปรเจค
-2. สร้าง Feature Branch (\`git checkout -b feature/AmazingFeature\`)
-3. Commit การเปลี่ยนแปลง (\`git commit -m 'Add some AmazingFeature'\`)
-4. Push ไปยัง Branch (\`git push origin feature/AmazingFeature\`)
-5. เปิด Pull Request
-
-## 📄 License
-
-โปรเจคนี้อยู่ภายใต้ MIT License - ดูไฟล์ [LICENSE](LICENSE) สำหรับรายละเอียด
-
-## 👥 ผู้พัฒนา
-
-- **ทีมพัฒนา** - ReviewCSC Hub Team
-
-## 🙏 ขอบคุณ
-
-- [Next.js](https://nextjs.org/) - React Framework
-- [Firebase](https://firebase.google.com/) - Backend Services
-- [Tailwind CSS](https://tailwindcss.com/) - CSS Framework
-- [shadcn/ui](https://ui.shadcn.com/) - UI Components
-- [Lucide](https://lucide.dev/) - Icons
-
----
 
 **ReviewCSC Hub** - แพลตฟอร์มแชร์ประสบการณ์และรีวิว 🌟
 \`\`\`
