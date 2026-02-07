@@ -33,8 +33,7 @@ export function RoomList({ onSelectRoom, onCreateRoom, selectedRoomId }: RoomLis
 
   const handleRefresh = () => {
     setRefreshing(true)
-    // การเรียกใช้ subscribeToChatRooms อีกครั้งจะทำให้ข้อมูลอัปเดต
-    // แต่เราไม่ต้องยกเลิกการสมัครสมาชิกเดิม เพราะเราใช้ useEffect
+   
   }
 
   const formatTimeAgo = (date: Date) => {

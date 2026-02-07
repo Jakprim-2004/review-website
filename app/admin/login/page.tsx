@@ -1,18 +1,17 @@
 "use client"
 
 import type React from "react"
-
 import { useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { toast } from "@/components/ui/use-toast"
-import { signIn } from "@/lib/firebase"
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { AlertCircle, Lock, User, Info } from "lucide-react"
-import Link from "next/link"
+import { signIn } from "@/lib/supabase"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { AlertCircle, Lock, Mail, KeyRound, ArrowLeft, Shield, Sparkles } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
 export default function AdminLogin() {
@@ -50,7 +49,8 @@ export default function AdminLogin() {
         if (
           error.message.includes("user-not-found") ||
           error.message.includes("wrong-password") ||
-          error.message.includes("invalid-credential")
+          error.message.includes("invalid-credential") ||
+          error.message.includes("Invalid login credentials")
         ) {
           errorMessage = "อีเมลหรือรหัสผ่านไม่ถูกต้อง กรุณาตรวจสอบข้อมูลและลองใหม่อีกครั้ง"
         } else if (error.message.includes("too-many-requests")) {
@@ -67,14 +67,12 @@ export default function AdminLogin() {
   const handleDemoLogin = () => {
     setIsSubmitting(true)
 
-    // จำลองการเข้าสู่ระบบสำหรับโหมดทดลองใช้งาน
     setTimeout(() => {
       toast({
         title: "เข้าสู่ระบบโหมดทดลองสำเร็จ",
         description: "คุณกำลังใช้งานในโหมดทดลอง สามารถทดสอบฟังก์ชันต่างๆ ได้",
       })
 
-      // เก็บสถานะการเข้าสู่ระบบในโหมดทดลองไว้ใน localStorage
       if (typeof window !== "undefined") {
         localStorage.setItem("demo_admin_mode", "true")
       }
@@ -85,67 +83,61 @@ export default function AdminLogin() {
   }
 
   return (
-    <div className="container mx-auto py-10 px-4">
-      <Link href="/" className="inline-flex items-center mb-6 text-blue-600 hover:text-blue-800 transition-colors">
-        <Button variant="ghost" className="pl-0">
-          <svg
-            xmlns="http://www.w3.org/2000/svg"
-            width="16"
-            height="16"
-            viewBox="0 0 24 24"
-            fill="none"
-            stroke="currentColor"
-            strokeWidth="2"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            className="mr-2"
-          >
-            <path d="m12 19-7-7 7-7" />
-            <path d="M19 12H5" />
-          </svg>
-          กลับไปหน้าหลัก
-        </Button>
-      </Link>
-
-      <div className="flex flex-col items-center justify-center">
-        <div className="bg-gradient-to-r from-blue-500 to-purple-500 text-white p-3 rounded-full mb-4">
-          <Lock className="h-8 w-8" />
-        </div>
-        <h1 className="text-3xl font-bold mb-8 text-center bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-          เข้าสู่ระบบผู้ดูแล
-        </h1>
+    <div className="min-h-screen flex flex-col items-center justify-center py-12 px-4 bg-gradient-to-b from-slate-50 to-white">
+      {/* Back Button */}
+      <div className="w-full max-w-md mb-6">
+        <Link href="/" className="inline-flex items-center text-slate-600 hover:text-slate-900 transition-colors">
+          <ArrowLeft className="w-4 h-4 mr-2" />
+          กลับหน้าหลัก
+        </Link>
       </div>
 
-      <Tabs defaultValue="login" className="max-w-md mx-auto">
-        <TabsList className="grid w-full grid-cols-2 mb-4">
-          <TabsTrigger value="login">เข้าสู่ระบบ</TabsTrigger>
-          <TabsTrigger value="demo">โหมดทดลอง</TabsTrigger>
+      {/* Header */}
+      <div className="flex flex-col items-center mb-8">
+        <div className="bg-gradient-to-r from-violet-500 to-purple-600 text-white p-4 rounded-2xl mb-4 shadow-lg">
+          <Shield className="h-8 w-8" />
+        </div>
+        <h1 className="text-3xl font-bold text-center bg-gradient-to-r from-violet-600 to-purple-600 bg-clip-text text-transparent">
+          ระบบผู้ดูแล
+        </h1>
+        <p className="text-slate-500 mt-2">เข้าสู่ระบบเพื่อจัดการเนื้อหา</p>
+      </div>
+
+      {/* Login Card */}
+      <Tabs defaultValue="login" className="w-full max-w-md">
+        <TabsList className="grid w-full grid-cols-2 mb-6 bg-slate-100 p-1 rounded-xl">
+          <TabsTrigger value="login" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Lock className="w-4 h-4 mr-2" />
+            เข้าสู่ระบบ
+          </TabsTrigger>
+          <TabsTrigger value="demo" className="rounded-lg data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Sparkles className="w-4 h-4 mr-2" />
+            โหมดทดลอง
+          </TabsTrigger>
         </TabsList>
 
+        {/* Login Tab */}
         <TabsContent value="login">
-          <Card className="border-t-4 border-t-purple-500 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-xl text-gray-800">เข้าสู่ระบบ</CardTitle>
+          <Card className="border-0 shadow-xl rounded-2xl overflow-hidden">
+            <div className="h-1.5 bg-gradient-to-r from-violet-500 to-purple-600" />
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl text-slate-800">เข้าสู่ระบบ</CardTitle>
               <CardDescription>กรอกข้อมูลเพื่อเข้าสู่ระบบผู้ดูแล</CardDescription>
             </CardHeader>
 
-            {error && (
-              <div className="px-6">
-                <Alert variant="destructive" className="mb-4">
+            <CardContent>
+              {error && (
+                <Alert variant="destructive" className="mb-4 rounded-xl">
                   <AlertCircle className="h-4 w-4" />
                   <AlertDescription>{error}</AlertDescription>
                 </Alert>
-              </div>
-            )}
+              )}
 
-            <form onSubmit={handleSubmit}>
-              <CardContent className="space-y-4">
+              <form onSubmit={handleSubmit} className="space-y-4">
                 <div className="space-y-2">
-                  <Label htmlFor="email" className="text-gray-700">
-                    อีเมล
-                  </Label>
+                  <Label htmlFor="email" className="text-slate-700">อีเมล</Label>
                   <div className="relative">
-                    <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <Mail className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input
                       id="email"
                       name="email"
@@ -153,18 +145,16 @@ export default function AdminLogin() {
                       placeholder="admin@example.com"
                       value={formData.email}
                       onChange={handleChange}
-                      className="pl-10 focus-visible:ring-purple-500"
                       required
+                      className="pl-10 h-12 rounded-xl border-slate-200 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                     />
                   </div>
                 </div>
 
                 <div className="space-y-2">
-                  <Label htmlFor="password" className="text-gray-700">
-                    รหัสผ่าน
-                  </Label>
+                  <Label htmlFor="password" className="text-slate-700">รหัสผ่าน</Label>
                   <div className="relative">
-                    <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+                    <KeyRound className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                     <Input
                       id="password"
                       name="password"
@@ -172,73 +162,79 @@ export default function AdminLogin() {
                       placeholder="••••••••"
                       value={formData.password}
                       onChange={handleChange}
-                      className="pl-10 focus-visible:ring-purple-500"
                       required
+                      className="pl-10 h-12 rounded-xl border-slate-200 focus:ring-2 focus:ring-violet-500 focus:border-violet-500"
                     />
                   </div>
                 </div>
-              </CardContent>
-              <CardFooter className="flex-col gap-4">
+
                 <Button
                   type="submit"
-                  className="w-full bg-gradient-to-r from-blue-500 to-purple-500 hover:from-blue-600 hover:to-purple-600"
                   disabled={isSubmitting}
+                  className="w-full h-12 rounded-xl bg-gradient-to-r from-violet-600 to-purple-600 hover:from-violet-700 hover:to-purple-700 text-white font-medium shadow-lg transition-all duration-200"
                 >
-                  {isSubmitting ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่ระบบ"}
+                  {isSubmitting ? (
+                    <div className="flex items-center gap-2">
+                      <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      กำลังเข้าสู่ระบบ...
+                    </div>
+                  ) : (
+                    "เข้าสู่ระบบ"
+                  )}
                 </Button>
-              </CardFooter>
-            </form>
+              </form>
+            </CardContent>
           </Card>
         </TabsContent>
 
+        {/* Demo Tab */}
         <TabsContent value="demo">
-          <Card className="border-t-4 border-t-blue-500 shadow-lg">
-            <CardHeader>
-              <CardTitle className="text-xl text-gray-800">โหมดทดลองใช้งาน</CardTitle>
+          <Card className="border-0 shadow-xl rounded-2xl overflow-hidden">
+            <div className="h-1.5 bg-gradient-to-r from-amber-400 to-orange-500" />
+            <CardHeader className="pb-4">
+              <CardTitle className="text-xl text-slate-800 flex items-center gap-2">
+                <Sparkles className="w-5 h-5 text-amber-500" />
+                โหมดทดลองใช้งาน
+              </CardTitle>
               <CardDescription>ทดลองใช้งานระบบผู้ดูแลโดยไม่ต้องลงทะเบียน</CardDescription>
             </CardHeader>
 
-            <CardContent>
-              <Alert className="mb-4">
-                <Info className="h-4 w-4" />
-                <AlertTitle>สำหรับการทดลองใช้งาน</AlertTitle>
-                <AlertDescription>
-                  โหมดนี้ใช้สำหรับทดลองใช้งานระบบผู้ดูแลเท่านั้น ไม่จำเป็นต้องมีบัญชีผู้ใช้จริง ข้อมูลจะถูกเก็บในเครื่องของคุณเท่านั้น
-                </AlertDescription>
-              </Alert>
-
-              <div className="space-y-4">
-                <p className="text-sm text-gray-600">ในโหมดทดลองใช้งาน คุณสามารถ:</p>
-                <ul className="list-disc pl-5 text-sm text-gray-600 space-y-1">
-                  <li>ดูรีวิวทั้งหมดในระบบ</li>
-                  <li>ลบรีวิวที่เก็บในเครื่องของคุณ</li>
-                  <li>ทดลองใช้งานฟังก์ชันต่างๆ ของระบบผู้ดูแล</li>
+            <CardContent className="space-y-6">
+              <div className="bg-amber-50 border border-amber-200 rounded-xl p-4">
+                <h4 className="font-medium text-amber-800 mb-2">ฟีเจอร์ที่รองรับในโหมดทดลอง:</h4>
+                <ul className="text-sm text-amber-700 space-y-1">
+                  <li>✅ ดูภาพรวม Dashboard</li>
+                  <li>✅ จัดการรีวิว (เพิ่ม/ลบ/แก้ไข)</li>
+                  <li>✅ ดูสถิติและรายงาน</li>
+                  <li>⚠️ ข้อมูลจะไม่ถูกบันทึกจริง</li>
                 </ul>
               </div>
-            </CardContent>
 
-            <CardFooter>
               <Button
                 onClick={handleDemoLogin}
-                className="w-full bg-gradient-to-r from-blue-400 to-blue-600 hover:from-blue-500 hover:to-blue-700"
                 disabled={isSubmitting}
+                className="w-full h-12 rounded-xl bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-600 hover:to-orange-600 text-white font-medium shadow-lg transition-all duration-200"
               >
-                {isSubmitting ? "กำลังเข้าสู่ระบบ..." : "เข้าสู่โหมดทดลองใช้งาน"}
+                {isSubmitting ? (
+                  <div className="flex items-center gap-2">
+                    <div className="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    กำลังเข้าสู่ระบบ...
+                  </div>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4 mr-2" />
+                    เข้าสู่โหมดทดลอง
+                  </>
+                )}
               </Button>
-            </CardFooter>
+            </CardContent>
           </Card>
         </TabsContent>
       </Tabs>
 
-      <div className="max-w-md mx-auto mt-6 p-4 bg-gray-50 rounded-lg border border-gray-200">
-        <h3 className="text-sm font-medium text-gray-700 mb-2">วิธีตั้งค่าบัญชีผู้ดูแล</h3>
-        <ol className="list-decimal pl-5 text-sm text-gray-600 space-y-1">
-          <li>ไปที่ Firebase Console ของคุณ</li>
-          <li>เลือกโปรเจค "reviwe-38148"</li>
-          <li>ไปที่ "Authentication" และเปิดใช้งานการยืนยันตัวตนด้วยอีเมล/รหัสผ่าน</li>
-          <li>เพิ่มผู้ใช้ใหม่ด้วยอีเมลและรหัสผ่านที่ต้องการ</li>
-          <li>ใช้ข้อมูลนี้เพื่อเข้าสู่ระบบผู้ดูแล</li>
-        </ol>
+      {/* Footer Info */}
+      <div className="w-full max-w-md mt-8 text-center text-sm text-slate-500">
+        <p>ต้องการความช่วยเหลือ? ติดต่อผู้ดูแลระบบ</p>
       </div>
     </div>
   )

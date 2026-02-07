@@ -1,13 +1,21 @@
 "use client"
 
 import { useEffect, useRef } from "react"
-import type { ChatMessage } from "@/lib/chat"
-import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
 import { AlertCircle } from "lucide-react"
 
+interface Message {
+  id: string
+  text: string
+  author: string
+  createdAt: Date | any
+  isLocal?: boolean
+  avatar_url?: string
+}
+
 interface MessageListProps {
-  messages: ChatMessage[]
+  messages: Message[]
   currentUser: string
 }
 
@@ -55,6 +63,7 @@ export function MessageList({ messages, currentUser }: MessageListProps) {
             <div className="flex items-start gap-2 max-w-[80%]">
               {!isCurrentUser && (
                 <Avatar className="h-8 w-8 bg-blue-100">
+                  <AvatarImage src={message.avatar_url} />
                   <AvatarFallback className="text-blue-500">{message.author.charAt(0).toUpperCase()}</AvatarFallback>
                 </Avatar>
               )}
@@ -79,14 +88,15 @@ export function MessageList({ messages, currentUser }: MessageListProps) {
                 <div className={cn("text-xs mt-1", isCurrentUser ? "text-right text-gray-500" : "text-gray-500")}>
                   {message.createdAt instanceof Date
                     ? message.createdAt.toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })
                     : "กำลังส่ง..."}
                 </div>
               </div>
               {isCurrentUser && (
                 <Avatar className="h-8 w-8 bg-blue-500">
+                  <AvatarImage src={message.avatar_url} />
                   <AvatarFallback className="text-white">{message.author.charAt(0).toUpperCase()}</AvatarFallback>
                 </Avatar>
               )}

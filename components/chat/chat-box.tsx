@@ -6,117 +6,184 @@ import { MessageInput } from "./message-input"
 import { RoomList } from "./room-list"
 import { CreateRoomDialog } from "./create-room-dialog"
 import {
-  addChatMessage,
-  subscribeToChatMessages,
-  type ChatMessage,
+  getChatRooms as getSupabaseChatRooms,
+  getChatMessages,
+  sendChatMessage,
+  subscribeToMessages,
+  createChatRoom as createSupabaseChatRoom,
+  getCurrentUser,
+  onAuthStateChange,
   type ChatRoom,
-  getUserDisplayName,
-  saveUserDisplayName,
-  joinChatRoom,
-  leaveChatRoom,
-  setupRoomCleanupInterval,
-  getChatRoom,
-} from "@/lib/chat"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
+  type ChatMessage,
+} from "@/lib/supabase"
 import { Button } from "@/components/ui/button"
-import { Label } from "@/components/ui/label"
 import { toast } from "@/components/ui/use-toast"
-import { MessageSquare, Users, ArrowLeft, AlertCircle } from "lucide-react"
+import { MessageSquare, Users, ArrowLeft, AlertCircle, LogIn, RefreshCw } from "lucide-react"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Separator } from "@/components/ui/separator"
 import { Alert, AlertDescription } from "@/components/ui/alert"
+import Link from "next/link"
+
+// Transform Supabase ChatMessage to MessageList format
+interface DisplayMessage {
+  id: string
+  text: string
+  author: string
+  createdAt: Date
+  roomId: string
+  avatar_url?: string
+}
+
+// Transform Supabase ChatRoom to RoomList format
+interface DisplayRoom {
+  id: string
+  name: string
+  description: string
+  createdAt: Date
+  lastActivity: Date
+  createdBy: string
+  activeUsers: number
+  isLocal?: boolean
+}
 
 export function ChatBox() {
-  const [messages, setMessages] = useState<ChatMessage[]>([])
+  const [messages, setMessages] = useState<DisplayMessage[]>([])
+  const [rooms, setRooms] = useState<DisplayRoom[]>([])
   const [loading, setLoading] = useState(true)
+  const [loadingRooms, setLoadingRooms] = useState(true)
   const [username, setUsername] = useState("")
-  const [isSettingName, setIsSettingName] = useState(false)
+  const [user, setUser] = useState<any>(null)
+  const [userLoading, setUserLoading] = useState(true)
   const [isSending, setIsSending] = useState(false)
-  const [selectedRoom, setSelectedRoom] = useState<ChatRoom | null>(null)
+  const [selectedRoom, setSelectedRoom] = useState<DisplayRoom | null>(null)
   const [createRoomDialogOpen, setCreateRoomDialogOpen] = useState(false)
   const [activeTab, setActiveTab] = useState<string>("rooms")
   const [error, setError] = useState<string | null>(null)
+  const [isLoadingMore, setIsLoadingMore] = useState(false)
+  const [hasMore, setHasMore] = useState(true)
 
-  // โหลดชื่อผู้ใช้จาก localStorage
+  // ดึงข้อมูล user ที่ login
   useEffect(() => {
-    const storedName = getUserDisplayName()
-    if (storedName) {
-      setUsername(storedName)
-    } else {
-      setIsSettingName(true)
+    const checkUser = async () => {
+      const currentUser = await getCurrentUser()
+      setUser(currentUser)
+      if (currentUser) {
+        const displayName = currentUser.user_metadata?.display_name ||
+          currentUser.email?.split("@")[0] ||
+          "ผู้ใช้งาน"
+        setUsername(displayName)
+      }
+      setUserLoading(false)
     }
+    checkUser()
 
-    // ตั้งเวลาตรวจสอบและลบห้องที่ไม่มีกิจกรรม
-    let cleanupInterval: number | null = null
+    const unsubscribe = onAuthStateChange((currentUser) => {
+      setUser(currentUser)
+      if (currentUser) {
+        const displayName = currentUser.user_metadata?.display_name ||
+          currentUser.email?.split("@")[0] ||
+          "ผู้ใช้งาน"
+        setUsername(displayName)
+      }
+      setUserLoading(false)
+    })
+
+    return () => unsubscribe()
+  }, [])
+
+  // ดึงรายการห้องแชทจาก Supabase
+  const fetchRooms = useCallback(async () => {
+    setLoadingRooms(true)
     try {
-      cleanupInterval = setupRoomCleanupInterval()
+      const roomsData = await getSupabaseChatRooms()
+      const transformedRooms: DisplayRoom[] = roomsData.map((room: ChatRoom) => ({
+        id: room.id,
+        name: room.name,
+        description: room.description || "",
+        createdAt: new Date(room.created_at),
+        lastActivity: new Date(room.last_activity),
+        createdBy: room.created_by || "",
+        activeUsers: 0,
+      }))
+      setRooms(transformedRooms)
     } catch (error) {
-      console.error("Failed to setup room cleanup interval:", error)
-      // ไม่ต้องทำอะไรเพิ่มเติม เพราะนี่เป็นฟีเจอร์เสริม ไม่ใช่ฟังก์ชันหลัก
-    }
-
-    return () => {
-      if (cleanupInterval) clearInterval(cleanupInterval)
+      console.error("Error fetching rooms:", error)
+      toast({
+        title: "เกิดข้อผิดพลาด",
+        description: "ไม่สามารถโหลดรายการห้องแชทได้",
+        variant: "destructive",
+      })
+    } finally {
+      setLoadingRooms(false)
     }
   }, [])
 
-  // เมื่อเลือกห้อง
+  // โหลดห้องแชทเมื่อเริ่มต้น
+  useEffect(() => {
+    fetchRooms()
+  }, [fetchRooms])
+
+  // เมื่อเลือกห้อง - โหลดข้อความและ subscribe to realtime
   useEffect(() => {
     if (selectedRoom) {
       setLoading(true)
       setError(null)
       setActiveTab("chat")
 
-      console.log("Selected room:", selectedRoom.id, selectedRoom.name)
-
-      // เข้าร่วมห้อง
-      joinChatRoom(selectedRoom.id).then((success) => {
-        if (!success) {
-          console.warn("Failed to join room:", selectedRoom.id)
+      // ดึงข้อความเก่าจาก Supabase
+      const fetchMessages = async () => {
+        try {
+          setHasMore(true)
+          const messagesData = await getChatMessages(selectedRoom.id, 50)
+          const transformedMessages: DisplayMessage[] = messagesData.map((msg: ChatMessage) => ({
+            id: msg.id,
+            text: msg.content,
+            author: msg.author,
+            createdAt: new Date(msg.created_at),
+            roomId: msg.room_id,
+            avatar_url: msg.avatar_url,
+          }))
+          setMessages(transformedMessages)
+          if (messagesData.length < 50) setHasMore(false)
+        } catch (error) {
+          console.error("Error fetching messages:", error)
+          setError("ไม่สามารถโหลดข้อความได้")
+        } finally {
+          setLoading(false)
         }
-      })
+      }
 
-      // ติดตามข้อความในห้อง
-      const unsubscribe = subscribeToChatMessages(selectedRoom.id, (newMessages) => {
-        console.log("Received messages:", newMessages.length)
-        setMessages(newMessages)
-        setLoading(false)
+      fetchMessages()
+
+      // Subscribe to realtime messages
+      const unsubscribe = subscribeToMessages(selectedRoom.id, (newMessage: ChatMessage) => {
+        const transformedMessage: DisplayMessage = {
+          id: newMessage.id,
+          text: newMessage.content,
+          author: newMessage.author,
+          createdAt: new Date(newMessage.created_at),
+          roomId: newMessage.room_id,
+          avatar_url: newMessage.avatar_url,
+        }
+        setMessages((prev) => [...prev, transformedMessage])
       })
 
       return () => {
-        console.log("Cleaning up room subscription")
         unsubscribe()
-        // ออกจากห้องเมื่อออกจากคอมโพเนนต์หรือเปลี่ยนห้อง
-        if (selectedRoom) {
-          leaveChatRoom(selectedRoom.id).then((success) => {
-            if (!success) {
-              console.warn("Failed to leave room:", selectedRoom.id)
-            }
-          })
-        }
       }
     } else {
       setMessages([])
     }
   }, [selectedRoom])
 
-  // บันทึกชื่อผู้ใช้
-  const handleSetUsername = () => {
-    if (username.trim()) {
-      saveUserDisplayName(username.trim())
-      setIsSettingName(false)
-      toast({
-        title: "ตั้งชื่อสำเร็จ",
-        description: `คุณจะแสดงเป็น "${username.trim()}" ในแชท`,
-      })
-    }
-  }
-
   // ส่งข้อความ
   const handleSendMessage = async (text: string) => {
     if (!username) {
-      setIsSettingName(true)
+      toast({
+        title: "กรุณาเข้าสู่ระบบ",
+        description: "คุณต้องเข้าสู่ระบบก่อนส่งข้อความ",
+        variant: "destructive",
+      })
       return
     }
 
@@ -133,32 +200,25 @@ export function ChatBox() {
     setError(null)
 
     try {
-      console.log("Sending message:", text, "to room:", selectedRoom.id)
-      const result = await addChatMessage({
-        text,
+      const result = await sendChatMessage(selectedRoom.id, {
         author: username,
-        roomId: selectedRoom.id,
+        content: text,
+        user_id: user.id,
+        avatar_url: user.user_metadata?.avatar_url,
       })
 
-      if (!result.success) {
-        console.error("Failed to send message:", result.error)
+      if (!result) {
         setError("ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง")
         toast({
           title: "ส่งข้อความไม่สำเร็จ",
-          description: result.error || "กรุณาลองใหม่อีกครั้ง",
+          description: "กรุณาลองใหม่อีกครั้ง",
           variant: "destructive",
         })
       }
+      // ไม่ต้อง add message เอง เพราะ realtime subscription จะจัดการให้
     } catch (error) {
       console.error("Error sending message:", error)
-      let errorMessage = "เกิดข้อผิดพลาดในการส่งข้อความ"
-
-      // ตรวจสอบว่าเป็นข้อผิดพลาดเกี่ยวกับ index หรือไม่
-      if (error.toString().includes("index")) {
-        errorMessage = "เกิดข้อผิดพลาดเกี่ยวกับ index ใน Firebase โปรดตรวจสอบคอนโซลเพื่อดูลิงก์สำหรับสร้าง index"
-      }
-
-      setError(errorMessage)
+      setError("เกิดข้อผิดพลาดในการส่งข้อความ")
       toast({
         title: "เกิดข้อผิดพลาด",
         description: "ไม่สามารถส่งข้อความได้ กรุณาลองใหม่อีกครั้ง",
@@ -170,41 +230,9 @@ export function ChatBox() {
   }
 
   // เลือกห้องแชท
-  const handleSelectRoom = useCallback(
-    async (room: ChatRoom) => {
-      try {
-        console.log("Selecting room:", room.id, room.name)
-
-        // ถ้ากำลังอยู่ในห้องปัจจุบัน ให้ออกจากห้องก่อน
-        if (selectedRoom) {
-          await leaveChatRoom(selectedRoom.id)
-        }
-
-        // ตรวจสอบว่าห้องยังมีอยู่หรือไม่
-        if (!room.isLocal) {
-          const roomData = await getChatRoom(room.id)
-          if (!roomData) {
-            toast({
-              title: "ไม่พบห้องแชท",
-              description: "ห้องแชทนี้อาจถูกลบไปแล้ว",
-              variant: "destructive",
-            })
-            return
-          }
-        }
-
-        setSelectedRoom(room)
-      } catch (error) {
-        console.error("Error selecting room:", error)
-        toast({
-          title: "เกิดข้อผิดพลาด",
-          description: "ไม่สามารถเข้าร่วมห้องแชทได้",
-          variant: "destructive",
-        })
-      }
-    },
-    [selectedRoom],
-  )
+  const handleSelectRoom = useCallback((room: DisplayRoom) => {
+    setSelectedRoom(room)
+  }, [])
 
   // สร้างห้องแชทใหม่
   const handleCreateRoom = () => {
@@ -213,44 +241,19 @@ export function ChatBox() {
 
   // เมื่อสร้างห้องแชทสำเร็จ
   const handleRoomCreated = async (roomId: string) => {
-    try {
-      console.log("Room created:", roomId)
+    // Refresh room list
+    await fetchRooms()
 
-      // สำหรับห้องที่เก็บใน localStorage
-      if (roomId.startsWith("local_")) {
-        const storedRooms = localStorage.getItem("local_chat_rooms")
-        if (storedRooms) {
-          const rooms = JSON.parse(storedRooms)
-          const newRoom = rooms.find((r: any) => r.id === roomId)
-          if (newRoom) {
-            setSelectedRoom({
-              ...newRoom,
-              createdAt: new Date(newRoom.createdAt),
-              lastActivity: new Date(newRoom.lastActivity),
-              isLocal: true,
-            })
-            return
-          }
-        }
-      }
-
-      // สำหรับห้องที่เก็บใน Firebase
-      // ดึงข้อมูลห้องที่สร้างใหม่
-      const roomData = await getChatRoom(roomId)
-      if (roomData) {
-        setSelectedRoom(roomData)
-      } else {
-        // ถ้าไม่พบห้อง ให้กลับไปที่รายการห้อง
-        setActiveTab("rooms")
-        toast({
-          title: "สร้างห้องแชทสำเร็จ",
-          description: "กรุณาเลือกห้องแชทจากรายการ",
-        })
-      }
-    } catch (error) {
-      console.error("Error after room creation:", error)
-      setActiveTab("rooms")
+    // Find and select the new room
+    const newRoom = rooms.find(r => r.id === roomId)
+    if (newRoom) {
+      setSelectedRoom(newRoom)
     }
+
+    toast({
+      title: "สร้างห้องแชทสำเร็จ",
+      description: "ห้องแชทใหม่ถูกสร้างเรียบร้อยแล้ว",
+    })
   }
 
   // กลับไปหน้ารายการห้อง
@@ -258,152 +261,223 @@ export function ChatBox() {
     setActiveTab("rooms")
   }
 
-  // แสดงหน้าตั้งชื่อ
-  if (isSettingName) {
+  const loadMoreMessages = async () => {
+    if (!selectedRoom || isLoadingMore || !messages.length) return
+    setIsLoadingMore(true)
+    try {
+      const oldestMessageId = messages[0].id
+      const olderMessages = await getChatMessages(selectedRoom.id, 50, oldestMessageId)
+
+      if (olderMessages.length > 0) {
+        const transformedMessages: DisplayMessage[] = olderMessages.map((msg: ChatMessage) => ({
+          id: msg.id,
+          text: msg.content,
+          author: msg.author,
+          createdAt: new Date(msg.created_at),
+          roomId: msg.room_id,
+          avatar_url: msg.avatar_url,
+        }))
+        setMessages(prev => [...transformedMessages, ...prev])
+        if (olderMessages.length < 50) setHasMore(false)
+      } else {
+        setHasMore(false)
+      }
+    } catch (error) {
+      console.error("Error loading more messages:", error)
+    } finally {
+      setIsLoadingMore(false)
+    }
+  }
+
+  // Loading state
+  if (userLoading) {
     return (
-      <Card className="w-full max-w-md mx-auto">
-        <CardHeader>
-          <CardTitle className="flex items-center gap-2">
-            <MessageSquare className="h-5 w-5 text-blue-500" />
-            ตั้งชื่อในแชท
-          </CardTitle>
-          <CardDescription>กรุณาตั้งชื่อที่จะแสดงในแชท</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="username">ชื่อของคุณ</Label>
-              <Input
-                id="username"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                placeholder="ใส่ชื่อของคุณ"
-                className="focus-visible:ring-blue-500"
-              />
-            </div>
-            <Button
-              onClick={handleSetUsername}
-              disabled={!username.trim()}
-              className="w-full bg-blue-500 hover:bg-blue-600"
-            >
-              เริ่มแชท
-            </Button>
-          </div>
-        </CardContent>
-      </Card>
+      <div className="flex items-center justify-center py-12">
+        <div className="w-6 h-6 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    )
+  }
+
+  // ถ้ายังไม่ได้ login
+  if (!user) {
+    return (
+      <div className="text-center py-12 px-4">
+        <div className="inline-flex items-center justify-center w-16 h-16 rounded-full bg-slate-100 text-slate-400 mb-4">
+          <LogIn className="w-8 h-8" />
+        </div>
+        <h3 className="text-xl font-bold text-slate-800 mb-2">กรุณาเข้าสู่ระบบ</h3>
+        <p className="text-slate-500 mb-6">คุณต้องเข้าสู่ระบบก่อนจึงจะใช้งานแชทได้</p>
+        <Link href="/auth">
+          <Button className="bg-blue-600 hover:bg-blue-700 rounded-xl">
+            <LogIn className="w-4 h-4 mr-2" />
+            เข้าสู่ระบบ
+          </Button>
+        </Link>
+      </div>
     )
   }
 
   return (
-    <Card className="w-full">
-      <CardHeader className="bg-gradient-to-r from-blue-50 to-purple-50 pb-2">
+    <div className="w-full">
+      <div className="p-4 border-b bg-gradient-to-r from-blue-50 to-purple-50">
         <div className="flex justify-between items-center">
           <div>
-            <CardTitle className="flex items-center gap-2">
+            <h3 className="font-semibold flex items-center gap-2 text-slate-800">
               <MessageSquare className="h-5 w-5 text-blue-500" />
               ระบบแชท
-            </CardTitle>
-            <CardDescription>พูดคุยกับผู้ใช้คนอื่นๆ ในห้องแชทต่างๆ</CardDescription>
+            </h3>
+            <p className="text-sm text-slate-500">พูดคุยกับผู้ใช้คนอื่นๆ ในห้องแชทต่างๆ</p>
           </div>
-          <Button variant="outline" size="sm" onClick={() => setIsSettingName(true)} className="text-xs">
-            แชทในชื่อ: {username}
-          </Button>
+         
         </div>
-      </CardHeader>
-      <CardContent className="p-0">
-        <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-          <div className="border-b">
-            <div className="container mx-auto">
-              <TabsList className="h-12">
-                <TabsTrigger value="rooms" className="flex items-center gap-1">
-                  <Users className="h-4 w-4" />
-                  ห้องแชท
-                </TabsTrigger>
-                <TabsTrigger value="chat" className="flex items-center gap-1" disabled={!selectedRoom}>
-                  <MessageSquare className="h-4 w-4" />
-                  {selectedRoom ? selectedRoom.name : "แชท"}
-                </TabsTrigger>
-              </TabsList>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <div className="border-b">
+          <div className="px-4">
+            <TabsList className="h-12 bg-transparent">
+              <TabsTrigger value="rooms" className="flex items-center gap-1.5 data-[state=active]:bg-blue-100 data-[state=active]:text-blue-700 rounded-lg">
+                <Users className="h-4 w-4" />
+                ห้องแชท
+              </TabsTrigger>
+              <TabsTrigger value="chat" className="flex items-center gap-1.5 data-[state=active]:bg-blue-100 data-[state=active]:text-blue-700 rounded-lg" disabled={!selectedRoom}>
+                <MessageSquare className="h-4 w-4" />
+                {selectedRoom ? selectedRoom.name : "แชท"}
+              </TabsTrigger>
+            </TabsList>
+          </div>
+        </div>
+
+        <TabsContent value="rooms" className="p-4 m-0">
+          <div className="flex justify-between items-center mb-4">
+            <h4 className="font-medium text-slate-700">ห้องแชททั้งหมด ({rooms.length})</h4>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={fetchRooms}
+                disabled={loadingRooms}
+                className="rounded-lg"
+              >
+                <RefreshCw className={`h-4 w-4 mr-1 ${loadingRooms ? "animate-spin" : ""}`} />
+                รีเฟรช
+              </Button>
+              <Button
+                size="sm"
+                onClick={handleCreateRoom}
+                className="rounded-lg bg-blue-600 hover:bg-blue-700"
+              >
+                + สร้างห้องใหม่
+              </Button>
             </div>
           </div>
 
-          <TabsContent value="rooms" className="p-4">
-            <RoomList
-              onSelectRoom={handleSelectRoom}
-              onCreateRoom={handleCreateRoom}
-              selectedRoomId={selectedRoom?.id}
-            />
-          </TabsContent>
-
-          <TabsContent value="chat" className="p-0">
-            {selectedRoom ? (
-              <>
-                <div className="p-4 border-b bg-gray-50">
-                  <div className="flex items-center gap-2">
-                    <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full" onClick={handleBackToRooms}>
-                      <ArrowLeft className="h-4 w-4" />
-                    </Button>
+          {loadingRooms ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="w-6 h-6 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+            </div>
+          ) : rooms.length > 0 ? (
+            <div className="space-y-2">
+              {rooms.map((room) => (
+                <div
+                  key={room.id}
+                  onClick={() => handleSelectRoom(room)}
+                  className={`p-4 rounded-xl border cursor-pointer transition-all ${selectedRoom?.id === room.id
+                    ? "bg-blue-50 border-blue-200"
+                    : "bg-white border-slate-200 hover:bg-slate-50"
+                    }`}
+                >
+                  <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="font-medium">{selectedRoom.name}</h3>
-                      <p className="text-xs text-gray-500">{selectedRoom.description}</p>
+                      <h5 className="font-medium text-slate-800">{room.name}</h5>
+                      <p className="text-sm text-slate-500">{room.description || "ไม่มีคำอธิบาย"}</p>
+                    </div>
+                    <div className="text-xs text-slate-400">
+                      {room.lastActivity.toLocaleDateString("th-TH")}
                     </div>
                   </div>
                 </div>
+              ))}
+            </div>
+          ) : (
+            <div className="text-center py-12 bg-slate-50 rounded-xl">
+              <MessageSquare className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-slate-500 mb-4">ยังไม่มีห้องแชท</p>
+              <Button onClick={handleCreateRoom} className="rounded-xl bg-blue-600 hover:bg-blue-700">
+                สร้างห้องแชทแรก
+              </Button>
+            </div>
+          )}
+        </TabsContent>
 
-                {error && (
-                  <Alert variant="destructive" className="m-4">
-                    <AlertCircle className="h-4 w-4" />
-                    <AlertDescription>
-                      {error}
-                      {error.includes("index") && (
-                        <div className="mt-2 text-xs">
-                          <p>ข้อผิดพลาดนี้เกิดจากการขาด index ใน Firebase</p>
-                          <p>โปรดคลิกที่ลิงก์ในคอนโซลเพื่อสร้าง index</p>
-                          <p className="mt-1 font-semibold">วิธีแก้ไข:</p>
-                          <ol className="list-decimal ml-4">
-                            <li>เปิด Developer Console (F12 หรือคลิกขวา {">"} Inspect)</li>
-                            <li>ไปที่แท็บ Console</li>
-                            <li>คลิกที่ลิงก์ที่ขึ้นต้นด้วย https://console.firebase.google.com/</li>
-                            <li>คลิก "Create index" ในหน้า Firebase Console</li>
-                          </ol>
-                        </div>
-                      )}
-                    </AlertDescription>
-                  </Alert>
-                )}
-
-                {loading ? (
-                  <div className="flex flex-col items-center justify-center h-[400px]">
-                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-                    <p className="mt-2 text-sm text-gray-500">กำลังโหลดข้อความ...</p>
+        <TabsContent value="chat" className="p-0 m-0">
+          {selectedRoom ? (
+            <>
+              <div className="p-4 border-b bg-slate-50">
+                <div className="flex items-center gap-3">
+                  <Button variant="ghost" size="icon" className="h-8 w-8 rounded-full hover:bg-slate-200" onClick={handleBackToRooms}>
+                    <ArrowLeft className="h-4 w-4" />
+                  </Button>
+                  <div>
+                    <h3 className="font-medium text-slate-800">{selectedRoom.name}</h3>
+                    <p className="text-xs text-slate-500">{selectedRoom.description}</p>
                   </div>
-                ) : (
-                  <MessageList messages={messages} currentUser={username} />
-                )}
-                <Separator />
-                <MessageInput onSendMessage={handleSendMessage} disabled={isSending} />
-              </>
-            ) : (
-              <div className="flex flex-col items-center justify-center h-[400px] text-center p-4">
-                <div className="bg-blue-100 p-3 rounded-full mb-3">
-                  <MessageSquare className="h-6 w-6 text-blue-500" />
                 </div>
-                <h3 className="text-lg font-medium mb-1">กรุณาเลือกห้องแชท</h3>
-                <p className="text-gray-500 mb-4">เลือกห้องแชทจากรายการเพื่อเริ่มการสนทนา</p>
-                <Button onClick={handleBackToRooms} variant="outline">
-                  ไปที่รายการห้องแชท
-                </Button>
               </div>
-            )}
-          </TabsContent>
-        </Tabs>
-      </CardContent>
+
+              {error && (
+                <Alert variant="destructive" className="m-4 rounded-xl">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+
+              {loading ? (
+                <div className="flex flex-col items-center justify-center h-[400px]">
+                  <div className="w-8 h-8 border-2 border-blue-600/30 border-t-blue-600 rounded-full animate-spin" />
+                  <p className="mt-3 text-sm text-slate-500">กำลังโหลดข้อความ...</p>
+                </div>
+              ) : (
+                <div className="flex flex-col h-[400px]">
+                  {hasMore && (
+                    <div className="text-center py-2 bg-slate-50">
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={loadMoreMessages}
+                        disabled={isLoadingMore}
+                        className="text-xs text-slate-400 hover:text-blue-600"
+                      >
+                        {isLoadingMore ? "กำลังโหลด..." : "โหลดข้อความเก่า"}
+                      </Button>
+                    </div>
+                  )}
+                  <MessageList messages={messages} currentUser={username} />
+                </div>
+              )}
+              <Separator />
+              <MessageInput onSendMessage={handleSendMessage} disabled={isSending} />
+            </>
+          ) : (
+            <div className="flex flex-col items-center justify-center h-[400px] text-center p-4">
+              <div className="bg-blue-100 p-4 rounded-full mb-4">
+                <MessageSquare className="h-8 w-8 text-blue-500" />
+              </div>
+              <h3 className="text-lg font-medium mb-2 text-slate-800">กรุณาเลือกห้องแชท</h3>
+              <p className="text-slate-500 mb-4">เลือกห้องแชทจากรายการเพื่อเริ่มการสนทนา</p>
+              <Button onClick={handleBackToRooms} variant="outline" className="rounded-xl">
+                ไปที่รายการห้องแชท
+              </Button>
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <CreateRoomDialog
         open={createRoomDialogOpen}
         onOpenChange={setCreateRoomDialogOpen}
         onRoomCreated={handleRoomCreated}
       />
-    </Card>
+    </div>
   )
 }
